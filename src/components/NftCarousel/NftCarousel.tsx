@@ -1,24 +1,15 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect } from 'react';
 import { Carousel } from 'react-responsive-carousel';
 import "react-responsive-carousel/lib/styles/carousel.min.css";
 import { Box,Text,Image } from '@chakra-ui/react';
 import { ethers } from 'ethers';
+import { useQueries } from 'react-query';
 import { config } from 'dotenv';
-
 config();
 
-const apiKey = process.env.NEXT_PUBLIC_COVALENT_API_KEY;
 const eth_mainnet_api_key = process.env.NEXT_PUBLIC_ETH_MAINNET_API_KEY;
 
 const NftCarousel = ({ address } : any) => {
-
-
-    const headers = {
-        'Authorization': `Bearer ${apiKey}`,
-    };
-    
-    const [nftBalances, setNftBalances] = useState<Record<string, any>>({})
-    const [loading, setLoading] = useState(true);
 
     const chains = ['eth-mainnet', 'matic-mainnet', 'matic-mumbai'];
 
@@ -26,49 +17,41 @@ const NftCarousel = ({ address } : any) => {
         return name.includes('.eth');
     };
 
-    useEffect(() => {
-        const fetchData = async () => {
-            if (address) {
-                const provider = new ethers.providers.JsonRpcProvider(`https://eth-mainnet.g.alchemy.com/v2/${eth_mainnet_api_key}`); 
-                let resolvedAddress = address;
-                if (isEnsName(address)) {
-                    try {
-                        resolvedAddress = await provider.resolveName(address);
-                        console.log('Resolved ENS name:', resolvedAddress);
-                    } catch (error) {
-                        console.error('Could not resolve ENS name:', error);
-                        return; 
-                    }
-                }
+    const getNftBalances = async (chainName : string, address : string) => {
+        let url = `http://localhost:8080/api/fetch/nftBalance?chainName=${chainName}&address=${address}`
+        const res = await fetch(url, { method: 'GET' })
+        const data = await res.json()
+        return data;
+    };
 
-                try {
-                    const promises = chains.map((chainName) => getNftBalances(chainName, resolvedAddress));
-                    const results = await Promise.all(promises);
-                    const balances : any = {};
-                    results.forEach((data, index) => {
-                        balances[chains[index]] = data;
-                    });
-                    setNftBalances(balances);
-                    setLoading(false);
-                } catch (error) {
-                    console.error('Error fetching NFT balances:', error);
-                }
-            }
-        };
-        fetchData();
+    let resolvedAddress = address;
+
+    useEffect(() => {
+        if (isEnsName(address)) {
+            const provider = new ethers.providers.JsonRpcProvider(`https://eth-mainnet.g.alchemy.com/v2/${eth_mainnet_api_key}`); 
+            provider.resolveName(address).then((resolvedAddress) => {
+                console.log('Resolved ENS name:', resolvedAddress);
+            }).catch((error) => {
+                console.error('Could not resolve ENS name:', error);
+            });
+        }
     }, [address]);
 
-    const getNftBalances = async (chainName : string, address : string) => {
-        try {
-            const url = `https://api.covalenthq.com/v1/${chainName}/address/${address}/balances_nft/`;
-            const res = await fetch(url, { method: 'GET', headers });
-            const data = await res.json();
-            return data;
-        } catch (error) {
-            console.error(`Error fetching NFT balances for chain '${chainName}':`, error);
-            return null;
+    const results = useQueries(
+        chains.map((chainName) => {
+            return {
+                queryKey: ['nftBalances', chainName, resolvedAddress],
+                queryFn: () => getNftBalances(chainName, resolvedAddress),
+            }
+        })
+    );
+
+    const nftBalances: Record<string, any> = {};
+    results.forEach((result, index) => {
+        if (result.status === 'success') {
+            nftBalances[chains[index]] = result.data;
         }
-    };
+    });
 
     const getOpenseaUrl = (chainName : string, contractAddress : string, tokenId : string) => {
         let openseaChainName = '';
